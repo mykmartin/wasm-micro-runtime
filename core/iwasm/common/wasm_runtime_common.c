@@ -770,13 +770,14 @@ wasm_runtime_unload(WASMModuleCommon *module)
 WASMModuleInstanceCommon *
 wasm_runtime_instantiate_internal(WASMModuleCommon *module, bool is_sub_inst,
                                   uint32 stack_size, uint32 heap_size,
+                                  const wasm_linear_buffer_alloc_t *lb_alloc,
                                   char *error_buf, uint32 error_buf_size)
 {
 #if WASM_ENABLE_INTERP != 0
     if (module->module_type == Wasm_Module_Bytecode)
         return (WASMModuleInstanceCommon *)wasm_instantiate(
-            (WASMModule *)module, is_sub_inst, stack_size, heap_size, error_buf,
-            error_buf_size);
+            (WASMModule *)module, is_sub_inst, stack_size, heap_size, lb_alloc,
+            error_buf, error_buf_size);
 #endif
 #if WASM_ENABLE_AOT != 0
     if (module->module_type == Wasm_Module_AoT)
@@ -790,12 +791,14 @@ wasm_runtime_instantiate_internal(WASMModuleCommon *module, bool is_sub_inst,
 }
 
 WASMModuleInstanceCommon *
-wasm_runtime_instantiate(WASMModuleCommon *module, uint32 stack_size,
-                         uint32 heap_size, char *error_buf,
-                         uint32 error_buf_size)
+wasm_runtime_instantiate(WASMModuleCommon *module,
+                         uint32 stack_size, uint32 heap_size,
+                         const wasm_linear_buffer_alloc_t *lb_alloc,
+                         char *error_buf, uint32 error_buf_size)
 {
     return wasm_runtime_instantiate_internal(
-        module, false, stack_size, heap_size, error_buf, error_buf_size);
+        module, false, stack_size, heap_size, lb_alloc, error_buf,
+        error_buf_size);
 }
 
 void

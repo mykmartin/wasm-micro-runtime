@@ -344,6 +344,7 @@ memories_deinstantiate(AOTModuleInstance *module_inst)
     wasm_runtime_free(module_inst->memories.ptr);
 }
 
+// TODO: update for linear buffer allocator API
 static AOTMemoryInstance *
 memory_instantiate(AOTModuleInstance *module_inst, AOTModule *module,
                    AOTMemoryInstance *memory_inst, AOTMemory *memory,

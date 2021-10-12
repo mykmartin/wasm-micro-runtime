@@ -78,6 +78,19 @@ runtime_malloc(uint64 size, char *error_buf, uint32 error_buf_size)
     return mem;
 }
 
+static void
+linear_buffer_free(WASMModuleInstance *module_inst, WASMMemoryInstance *memory)
+{
+    if (memory->memory_data) {
+        if (module_inst->lb_alloc.free_func) {
+            module_inst->lb_alloc.free_func(memory->memory_data,
+                                            module_inst->lb_alloc.user_data);
+        } else {
+            wasm_runtime_free(memory->memory_data);
+        }
+    }
+}
+
 #if WASM_ENABLE_MULTI_MODULE != 0
 static WASMModuleInstance *
 get_sub_module_inst(const WASMModuleInstance *parent_module_inst,
@@ -126,8 +139,7 @@ memories_deinstantiate(WASMModuleInstance *module_inst,
                     wasm_runtime_free(memories[i]->heap_handle);
                     memories[i]->heap_handle = NULL;
                 }
-                if (memories[i]->memory_data)
-                    wasm_runtime_free(memories[i]->memory_data);
+                linear_buffer_free(module_inst, memories[i]);
                 wasm_runtime_free(memories[i]);
             }
         }
@@ -262,10 +274,14 @@ memory_instantiate(WASMModuleInstance *module_inst, uint32 num_bytes_per_page,
         return NULL;
     }
 
-    if (memory_data_size > 0
-        && !(memory->memory_data =
-                 runtime_malloc(memory_data_size, error_buf, error_buf_size))) {
-        goto fail1;
+    if (memory_data_size > 0) {
+        wasm_linear_buffer_alloc_t *lba = &module_inst->lb_alloc;
+        memory->memory_data = lba->malloc_func
+            ? lba->malloc_func(memory_data_size, lba->user_data)
+            : runtime_malloc(memory_data_size, error_buf, error_buf_size);
+        if (!memory->memory_data) {
+            goto fail1;
+        }
     }
 
     memory->module_type = Wasm_Module_Bytecode;
@@ -321,8 +337,7 @@ fail3:
     if (heap_size > 0)
         wasm_runtime_free(memory->heap_handle);
 fail2:
-    if (memory->memory_data)
-        wasm_runtime_free(memory->memory_data);
+    linear_buffer_free(module_inst, memory);
 fail1:
     wasm_runtime_free(memory);
     return NULL;
@@ -998,8 +1013,9 @@ execute_free_function(WASMModuleInstance *module_inst,
 #if WASM_ENABLE_MULTI_MODULE != 0
 static bool
 sub_module_instantiate(WASMModule *module, WASMModuleInstance *module_inst,
-                       uint32 stack_size, uint32 heap_size, char *error_buf,
-                       uint32 error_buf_size)
+                       uint32 stack_size, uint32 heap_size,
+                       const wasm_linear_buffer_alloc_t *lb_alloc,
+                       char *error_buf, uint32 error_buf_size)
 {
     bh_list *sub_module_inst_list = module_inst->sub_module_inst_list;
     WASMRegisteredModule *sub_module_list_node =
@@ -1009,7 +1025,7 @@ sub_module_instantiate(WASMModule *module, WASMModuleInstance *module_inst,
         WASMSubModInstNode *sub_module_inst_list_node;
         WASMModule *sub_module = (WASMModule *)sub_module_list_node->module;
         WASMModuleInstance *sub_module_inst =
-            wasm_instantiate(sub_module, false, stack_size, heap_size,
+            wasm_instantiate(sub_module, false, stack_size, heap_size, lb_alloc,
                              error_buf, error_buf_size);
         if (!sub_module_inst) {
             LOG_DEBUG("instantiate %s failed",
@@ -1111,7 +1127,8 @@ check_linked_symbol(WASMModuleInstance *module_inst, char *error_buf,
  */
 WASMModuleInstance *
 wasm_instantiate(WASMModule *module, bool is_sub_inst, uint32 stack_size,
-                 uint32 heap_size, char *error_buf, uint32 error_buf_size)
+                 uint32 heap_size, const wasm_linear_buffer_alloc_t *lb_alloc,
+                 char *error_buf, uint32 error_buf_size)
 {
     WASMModuleInstance *module_inst;
     WASMGlobalInstance *globals = NULL, *global;
@@ -1141,7 +1158,7 @@ wasm_instantiate(WASMModule *module, bool is_sub_inst, uint32 stack_size,
 #if WASM_ENABLE_MULTI_MODULE != 0
     module_inst->sub_module_inst_list = &module_inst->sub_module_inst_list_head;
     ret = sub_module_instantiate(module, module_inst, stack_size, heap_size,
-                                 error_buf, error_buf_size);
+                                 lb_alloc, error_buf, error_buf_size);
     if (!ret) {
         LOG_DEBUG("build a sub module list failed");
         goto fail;
@@ -1171,6 +1188,22 @@ wasm_instantiate(WASMModule *module, bool is_sub_inst, uint32 stack_size,
     module_inst->table_count = module->import_table_count + module->table_count;
     module_inst->function_count =
         module->import_function_count + module->function_count;
+
+    if (lb_alloc) {
+        if (!lb_alloc->malloc_func || !lb_alloc->realloc_func ||
+            !lb_alloc->free_func) {
+            set_error_buf(error_buf, error_buf_size,
+                          "all linear buffer allocator functions are required");
+            goto fail;
+        }
+
+        /* Copy the function and user data pointers so callers don't need to
+           provide a persistent wasm_linear_buffer_alloc_t struct. */
+        module_inst->lb_alloc.malloc_func = lb_alloc->malloc_func;
+        module_inst->lb_alloc.realloc_func = lb_alloc->realloc_func;
+        module_inst->lb_alloc.free_func = lb_alloc->free_func;
+        module_inst->lb_alloc.user_data = lb_alloc->user_data;
+    }
 
     /* export */
     module_inst->export_func_count = get_export_count(module, EXPORT_KIND_FUNC);
@@ -2078,6 +2111,7 @@ wasm_enlarge_memory(WASMModuleInstance *module, uint32 inc_page_count)
     if (total_size >= UINT32_MAX) {
         return false;
     }
+    uint32 size_u32 = (uint32)total_size;
 
 #if WASM_ENABLE_SHARED_MEMORY != 0
     if (memory->is_shared) {
@@ -2095,20 +2129,34 @@ wasm_enlarge_memory(WASMModuleInstance *module, uint32 inc_page_count)
         }
     }
 
-    if (!(new_memory_data =
-              wasm_runtime_realloc(memory_data, (uint32)total_size))) {
-        if (!(new_memory_data = wasm_runtime_malloc((uint32)total_size))) {
-            return false;
+    wasm_linear_buffer_alloc_t *lba = &module->lb_alloc;
+    if (lba->realloc_func) {
+        if (!(new_memory_data = lba->realloc_func(memory_data, size_u32,
+                                                  lba->user_data))) {
+            if (!(new_memory_data = lba->malloc_func(size_u32,
+                                                     lba->user_data))) {
+                return false;
+            }
+            if (memory_data) {
+                bh_memcpy_s(new_memory_data, size_u32, memory_data,
+                            total_size_old);
+                lba->free_func(memory_data, lba->user_data);
+            }
         }
-        if (memory_data) {
-            bh_memcpy_s(new_memory_data, (uint32)total_size, memory_data,
-                        total_size_old);
-            wasm_runtime_free(memory_data);
+    } else {
+        if (!(new_memory_data = wasm_runtime_realloc(memory_data, size_u32))) {
+            if (!(new_memory_data = wasm_runtime_malloc(size_u32))) {
+                return false;
+            }
+            if (memory_data) {
+                bh_memcpy_s(new_memory_data, size_u32, memory_data,
+                            total_size_old);
+                wasm_runtime_free(memory_data);
+            }
         }
     }
 
-    memset(new_memory_data + total_size_old, 0,
-           (uint32)total_size - total_size_old);
+    memset(new_memory_data + total_size_old, 0, size_u32 - total_size_old);
 
     if (heap_size > 0) {
         if (mem_allocator_migrate(memory->heap_handle,

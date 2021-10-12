@@ -575,10 +575,30 @@ WASM_API_EXTERN own wasm_instance_t* wasm_instance_new(
   own wasm_trap_t**
 );
 
+#ifndef LINEAR_BUFFER_ALLOC_DEFINED
+#define LINEAR_BUFFER_ALLOC_DEFINED
+/* Memory allocation functions specifically for a module's linear memory. */
+typedef struct {
+  void *(*malloc_func)(unsigned int size, void *user_data);
+  void *(*realloc_func)(void *ptr, unsigned int size, void *user_data);
+  void (*free_func)(void *ptr, void *user_data);
+  void *user_data;
+} wasm_linear_buffer_alloc_t;
+#endif
+
+/* Create an instance using caller-provided allocator functions for the linear
+   memory buffer. lb_alloc does not need to persist beyond this function call;
+   the contained pointer values are copied. */
+WASM_API_EXTERN own wasm_instance_t* wasm_instance_new_with_lb_alloc(
+  wasm_store_t*, const wasm_module_t*, const wasm_extern_vec_t *imports,
+  own wasm_trap_t**, const wasm_linear_buffer_alloc_t *lb_alloc
+);
+
 // please refer to wasm_runtime_instantiate(...) in core/iwasm/include/wasm_export.h
 WASM_API_EXTERN own wasm_instance_t* wasm_instance_new_with_args(
   wasm_store_t*, const wasm_module_t*, const wasm_extern_vec_t *imports,
-  own wasm_trap_t**, const uint32_t stack_size, const uint32_t heap_size
+  own wasm_trap_t**, const uint32_t stack_size, const uint32_t heap_size,
+  const wasm_linear_buffer_alloc_t *lb_alloc
 );
 
 WASM_API_EXTERN void wasm_instance_exports(const wasm_instance_t*, own wasm_extern_vec_t* out);

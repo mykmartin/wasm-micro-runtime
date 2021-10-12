@@ -174,6 +174,7 @@ struct WASMModuleInstance {
     WASMTableInstance **tables;
     WASMGlobalInstance *globals;
     WASMFunctionInstance *functions;
+    wasm_linear_buffer_alloc_t lb_alloc;
 
     WASMExportFuncInstance *export_functions;
 #if WASM_ENABLE_MULTI_MODULE != 0
@@ -290,7 +291,8 @@ wasm_unload(WASMModule *module);
 
 WASMModuleInstance *
 wasm_instantiate(WASMModule *module, bool is_sub_inst, uint32 stack_size,
-                 uint32 heap_size, char *error_buf, uint32 error_buf_size);
+                 uint32 heap_size, const wasm_linear_buffer_alloc_t *lb_alloc,
+                 char *error_buf, uint32 error_buf_size);
 
 void
 wasm_dump_perf_profiling(const WASMModuleInstance *module_inst);

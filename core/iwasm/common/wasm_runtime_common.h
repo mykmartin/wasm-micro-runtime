@@ -424,6 +424,7 @@ wasm_runtime_unload(WASMModuleCommon *module);
 WASMModuleInstanceCommon *
 wasm_runtime_instantiate_internal(WASMModuleCommon *module, bool is_sub_inst,
                                   uint32 stack_size, uint32 heap_size,
+                                  const wasm_linear_buffer_alloc_t *lb_alloc,
                                   char *error_buf, uint32 error_buf_size);
 
 /* Internal API */
@@ -433,9 +434,10 @@ wasm_runtime_deinstantiate_internal(WASMModuleInstanceCommon *module_inst,
 
 /* See wasm_export.h for description */
 WASM_RUNTIME_API_EXTERN WASMModuleInstanceCommon *
-wasm_runtime_instantiate(WASMModuleCommon *module, uint32 stack_size,
-                         uint32 heap_size, char *error_buf,
-                         uint32 error_buf_size);
+wasm_runtime_instantiate(WASMModuleCommon *module,
+                         uint32 stack_size, uint32 heap_size,
+                         const wasm_linear_buffer_alloc_t *lb_alloc,
+                         char *error_buf, uint32 error_buf_size);
 
 /* See wasm_export.h for description */
 WASM_RUNTIME_API_EXTERN void

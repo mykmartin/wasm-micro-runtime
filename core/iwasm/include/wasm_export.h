@@ -140,6 +140,17 @@ typedef struct RuntimeInitArgs {
 #endif
 } RuntimeInitArgs;
 
+#ifndef LINEAR_BUFFER_ALLOC_DEFINED
+#define LINEAR_BUFFER_ALLOC_DEFINED
+/* Memory allocation functions specifically for a module's linear memory. */
+typedef struct {
+  void *(*malloc_func)(unsigned int size, void *user_data);
+  void *(*realloc_func)(void *ptr, unsigned int size, void *user_data);
+  void (*free_func)(void *ptr, void *user_data);
+  void *user_data;
+} wasm_linear_buffer_alloc_t;
+#endif
+
 #ifndef WASM_VALKIND_T_DEFINED
 #define WASM_VALKIND_T_DEFINED
 typedef uint8_t wasm_valkind_t;
@@ -358,6 +369,7 @@ wasm_runtime_set_wasi_args(wasm_module_t module,
 WASM_RUNTIME_API_EXTERN wasm_module_inst_t
 wasm_runtime_instantiate(const wasm_module_t module,
                          uint32_t stack_size, uint32_t heap_size,
+                         const wasm_linear_buffer_alloc_t *lb_alloc,
                          char *error_buf, uint32_t error_buf_size);
 
 /**
